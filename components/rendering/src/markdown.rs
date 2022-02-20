@@ -81,6 +81,7 @@ fn is_colocated_asset_link(link: &str) -> bool {
     !link.contains("//")  // http://, ftp:// etc
         && !link.contains("../")
         && !starts_with_schema(link)
+        && !link.starts_with('#')
 }
 
 /// Returns whether a link starts with an HTTP(s) scheme.
