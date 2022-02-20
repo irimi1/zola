@@ -1,5 +1,6 @@
 use lazy_static::lazy_static;
 use pulldown_cmark as cmark;
+use regex::Regex;
 
 use crate::context::RenderContext;
 use crate::table_of_contents::{make_table_of_contents, Heading};
@@ -59,6 +60,29 @@ fn find_anchor(anchors: &[String], name: String, level: u16) -> String {
     find_anchor(anchors, name, level + 1)
 }
 
+/// Returns whether the given string starts with a schema.
+///
+/// Although there exists [a list of registered URI schemes][uri-schemes], a link may use arbitrary,
+/// private schemes. This function checks if the given string starts with something that just looks
+/// like a scheme, i.e., a case-insensitive identifier followed by a colon.
+///
+/// [uri-schemes]: https://www.iana.org/assignments/uri-schemes/uri-schemes.xhtml
+fn starts_with_schema(s: &str) -> bool {
+    lazy_static! {
+        static ref PATTERN: Regex = Regex::new(r"^[0-9A-Za-z\-]+:").unwrap();
+    }
+
+    PATTERN.is_match(s)
+}
+
+/// Colocated asset links refers to the files in the same directory,
+/// there it should be a filename only
+fn is_colocated_asset_link(link: &str) -> bool {
+    !link.contains("//")  // http://, ftp:// etc
+        && !link.contains("../")
+        && !starts_with_schema(link)
+}
+
 /// Returns whether a link starts with an HTTP(s) scheme.
 fn is_external_link(link: &str) -> bool {
     link.starts_with("http:") || link.starts_with("https:")
@@ -89,6 +113,8 @@ fn fix_link(
                 return Err(format!("Relative link {} not found.", link).into());
             }
         }
+    } else if is_colocated_asset_link(link) {
+            format!("{}{}", context.current_page_permalink, link)
     } else {
         if is_external_link(link) {
             external_links.push(link.to_owned());
@@ -297,6 +323,15 @@ pub fn markdown_to_html(
                     // reset highlight and close the code block
                     code_block = None;
                     events.push(Event::Html("</code></pre>\n".into()));
+                }
+                Event::Start(Tag::Image(link_type, src, title)) => {
+                    if is_colocated_asset_link(&src) {
+                        let link = format!("{}{}", context.current_page_permalink, &*src);
+                        events.push(Event::Start(Tag::Image(link_type, link.into(), title)));
+                    }
+                    else {
+                        events.push(Event::Start(Tag::Image(link_type, src, title)))
+                    }
                 }
                 Event::Start(Tag::Link(link_type, link, title)) if link.is_empty() => {
                     error = Some(Error::msg("There is a link that is missing a URL"));
